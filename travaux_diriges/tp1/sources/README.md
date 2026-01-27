@@ -8,49 +8,58 @@
 *lscpu donne des infos utiles sur le processeur : nb core, taille de cache :*
 
 ```
-Architecture:            x86_64
-  CPU op-mode(s):        32-bit, 64-bit
-  Address sizes:         39 bits physical, 48 bits virtual
-  Byte Order:            Little Endian
-CPU(s):                  12
-  On-line CPU(s) list:   0-11
-Vendor ID:               GenuineIntel
-  Model name:            11th Gen Intel(R) Core(TM) i5-11400H @ 2.70GHz
-    CPU family:          6
-    Model:               141
-    Thread(s) per core:  2
-    Core(s) per socket:  6
-    Socket(s):           1
-    Stepping:            1
-    BogoMIPS:            5376.00
-    Flags:               fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology tsc_reliabl
-                         e nonstop_tsc cpuid pni pclmulqdq vmx ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch invpcid_single 
-                         ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow vnmi ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_n
-                         i avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx512vbmi umip avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid movdiri movdir64b fsrm avx512_vp2intersect m
-                         d_clear flush_l1d arch_capabilities
+Architecture:             x86_64
+  CPU op-mode(s):         32-bit, 64-bit
+  Address sizes:          39 bits physical, 48 bits virtual
+  Byte Order:             Little Endian
+CPU(s):                   16
+  On-line CPU(s) list:    0-15
+Vendor ID:                GenuineIntel
+  Model name:             11th Gen Intel(R) Core(TM) i7-11800H @ 2.30GHz
+    CPU family:           6
+    Model:                141
+    Thread(s) per core:   2
+    Core(s) per socket:   8
+    Socket(s):            1
+    Stepping:             1
+    BogoMIPS:             4607.99
+    Flags:                fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse s
+                          se2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology tsc_r
+                          eliable nonstop_tsc cpuid tsc_known_freq pni pclmulqdq vmx ssse3 fma cx16 pdcm pcid sse4_1 sse
+                          4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3d
+                          nowprefetch ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow ept vpid ept_ad fsgsbase tsc_adjust
+                          bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb a
+                          vx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves vnmi avx512vbmi umip avx512_vb
+                          mi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid movdiri movdir64b fs
+                          rm avx512_vp2intersect md_clear flush_l1d arch_capabilities
 Virtualization features:
-  Virtualization:        VT-x
-  Hypervisor vendor:     Microsoft
-  Virtualization type:   full
+  Virtualization:         VT-x
+  Hypervisor vendor:      Microsoft
+  Virtualization type:    full
 Caches (sum of all):
-  L1d:                   288 KiB (6 instances)
-  L1i:                   192 KiB (6 instances)
-  L2:                    7.5 MiB (6 instances)
-  L3:                    12 MiB (1 instance)
+  L1d:                    384 KiB (8 instances)
+  L1i:                    256 KiB (8 instances)
+  L2:                     10 MiB (8 instances)
+  L3:                     24 MiB (1 instance)
+NUMA:
+  NUMA node(s):           1
+  NUMA node0 CPU(s):      0-15
 Vulnerabilities:
-  Gather data sampling:  Unknown: Dependent on hypervisor status
-  Itlb multihit:         Not affected
-  L1tf:                  Not affected
-  Mds:                   Not affected
-  Meltdown:              Not affected
-  Mmio stale data:       Not affected
-  Retbleed:              Mitigation; Enhanced IBRS
-  Spec rstack overflow:  Not affected
-  Spec store bypass:     Mitigation; Speculative Store Bypass disabled via prctl and seccomp
-  Spectre v1:            Mitigation; usercopy/swapgs barriers and __user pointer sanitization
-  Spectre v2:            Mitigation; Enhanced IBRS, IBPB conditional, RSB filling, PBRSB-eIBRS SW sequence
-  Srbds:                 Not affected
-  Tsx async abort:       Not affected
+  Gather data sampling:   Not affected
+  Itlb multihit:          Not affected
+  L1tf:                   Not affected
+  Mds:                    Not affected
+  Meltdown:               Not affected
+  Mmio stale data:        Not affected
+  Reg file data sampling: Not affected
+  Retbleed:               Mitigation; Enhanced IBRS
+  Spec rstack overflow:   Not affected
+  Spec store bypass:      Mitigation; Speculative Store Bypass disabled via prctl
+  Spectre v1:             Mitigation; usercopy/swapgs barriers and __user pointer sanitization
+  Spectre v2:             Mitigation; Enhanced / Automatic IBRS; IBPB conditional; RSB filling; PBRSB-eIBRS SW sequence;
+                           BHI SW loop, KVM SW loop
+  Srbds:                  Not affected
+  Tsx async abort:        Not affected
 ```
 
 
