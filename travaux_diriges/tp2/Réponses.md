@@ -202,10 +202,6 @@ Afin de paralléliser le produit matrice–vecteur, on décide dans un deuxième
 
 ## Réponse EX2 : Produit Matrice-Vecteur Parallèle
 
-Cet exercice explore deux stratégies de décomposition de domaine pour paralléliser le produit $v = A.u$ : la décomposition par blocs de colonnes et par blocs de lignes.
-
----
-
 ## 2.a - Produit parallèle par colonnes
 
 **Question :** Calculer $N_{loc}$ et mettre en œuvre la stratégie.
@@ -247,9 +243,45 @@ Alice a parallélisé en partie un code sur machine à mémoire distribuée. Pou
 
 En utilisant la loi d’Amdhal, pouvez-vous prédire l’accélération maximale que pourra obtenir Alice avec son code (en considérant n ≫ 1) ?
 
+**Réponse :**
+Selon la loi d'Amdahl, l'accélération théorique $S(n)$ est limitée par la fraction séquentielle $s$ du programme.
+* Fraction parallèle ($p$) : $90\% = 0.9$
+* Fraction séquentielle ($s$) : $1 - p = 0.1$
+
+L'accélération maximale ($S_{max}$) est atteinte lorsque le nombre de processeurs tend vers l'infini ($n \to \infty$) :
+$$S_{max} = \lim_{n \to \infty} \frac{1}{s + \frac{p}{n}} = \frac{1}{s} = \frac{1}{0.1} = \mathbf{10}$$
+
+Alice pourra espérer une accélération maximale de **10**.
+
 À votre avis, pour ce jeu de donné spécifique, quel nombre de nœuds de calcul semble-t-il raisonnable de prendre pour ne pas trop gaspiller de ressources CPU ?
+
+**Réponse :**
+Pour éviter le gaspillage, il faut surveiller l'efficacité $E = \frac{S(n)}{n}$. Un règle empirique courante ("rule of thumb") est de viser le point où le temps d'exécution de la partie parallèle devient équivalent à celui de la partie séquentielle (ce qui correspond à une efficacité d'environ 50%).
+
+Si l'on choisit $n = 9$ nœuds :
+$$S(9) = \frac{1}{0.1 + \frac{0.9}{9}} = \frac{1}{0.1 + 0.1} = \frac{1}{0.2} = 5$$
+
+Avec **9 nœuds**, on obtient une accélération de 5 (soit 50% du maximum théorique) avec une efficacité de $5/9 \approx 55\%$. Au-delà, l'ajout de ressources apporte des gains marginaux décroissants (ex: avec 19 nœuds, le speedup n'est que de 6.5, pour une efficacité chutant à 34%).
+
+Il semble donc raisonnable de choisir **9 nœuds**.
 
 En effectuant son cacul sur son calculateur, Alice s’aperçoit qu’elle obtient une accélération maximale de quatre en augmentant le nombre de nœuds de calcul pour son jeu spécifique de données.
 
 En doublant la quantité de donnée à traiter, et en supposant la complexité de l’algorithme parallèle linéaire, quelle accélération maximale peut espérer Alice en utilisant la loi de Gustafson ?
+
+**Réponse :**
+1. **Analyse de la situation réelle :** Alice observe une accélération maximale plafonnant à 4. Cela indique que la fraction séquentielle réelle (incluant latence, overhead, etc.) n'est pas de 0.1, mais de :
+   $$S_{max} = 4 \implies s_{eff} = \frac{1}{4} = 0.25$$
+   Le ratio de travail initial est donc de **1 unité séquentielle** pour **3 unités parallèles** ($Total = 4$).
+
+2. **Application de la loi de Gustafson (Scaling faible) :**
+   Si l'on double la quantité de données, le travail parallèle double (complexité linéaire), tandis que le travail séquentiel reste constant.
+   * Travail Séquentiel ($W_s$) : $1$
+   * Nouveau Travail Parallèle ($W_p'$) : $3 \times 2 = 6$
+   * Nouveau Travail Total : $1 + 6 = 7$
+
+3. **Calcul de la nouvelle accélération :**
+   $$S_{Gustafson} = \frac{\text{Travail Total}}{\text{Travail Séquentiel}} = \frac{7}{1} = \mathbf{7}$$
+
+En doublant les données, Alice peut espérer une accélération maximale de **7**.
 
