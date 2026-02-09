@@ -4,7 +4,7 @@ SHELL := /bin/bash
 # O alvo principal. O '@' no início esconde o comando longo do terminal.
 run:
 	@source venv/bin/activate && \
-	mpirun -n 5 python bucket_sort.py && \
+	mpirun -n 20 python bucket_sort.py && \
 	deactivate
 	
 

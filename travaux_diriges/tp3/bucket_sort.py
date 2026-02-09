@@ -105,7 +105,7 @@ if rank == 0:
     final_counts = np.zeros(size, dtype=np.int32)
 
 #Chaque processus envoie le size de son balde final
-local_final_count = np.array(len(final_local_bucket), dtype=np.int32)
+local_final_count = np.array([len(final_local_bucket)], dtype=np.int32)
 comm.Gather(local_final_count, final_counts, root=0)
 
 #Le mestre prépare les desplacements pour Gatherv
