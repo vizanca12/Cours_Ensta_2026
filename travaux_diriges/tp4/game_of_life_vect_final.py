@@ -51,31 +51,39 @@ class Grille:
 
     @staticmethod        
     def h(x):
-        # Regras do jogo aplicadas ao resultado da convolução
-        # x é a matriz de vizinhos
-        x[x<=1] = -1  # Morre por subpopulação (nota: seu código original usava lógica diferente aqui, mantive a ideia)
-        x[x>=4] = -1  # Morre por superpopulação
-        x[x==2] = 0   # Mantém estado
-        x[x==3] = 1   # Nasce
+        """
+        Aplica as regras do jogo de la vida usando operações vetorizadas.
+        Entrada: x é a matriz contendo o número de vizinhos vivos de cada célula.
+        Saída: Matriz de mudanças a aplicar.
+        Regras:
+        - Células com <=1 vizinhos: morrem por subpopulação
+        - Células com >=4 vizinhos: morrem por superpopulação  
+        - Células com 2 vizinhos: mantêm seu estado
+        - Células com 3 vizinhos: nascem ou permanecem vivas
+        """
+        x[x <= 1] = -1   # Morre por subpopulação
+        x[x >= 4] = -1   # Morre por superpopulação
+        x[x == 2] = 0    # Mantém estado
+        x[x == 3] = 1    # Nasce
         return x
 
     def compute_next_iteration(self):
         """
-        Versão MPI com Ghost Cells
+        Versão MPI com Ghost Cells (Halo Exchange) e convolução vetorizada.
+        Implementa decomposição de domínio com trocas assíncronas de bordas.
         """
         # --- PASSO 1: Troca de Ghost Cells (Halo Exchange) ---
-        # Vizinhos no anel (Toro Vertical)
+        # Vizinhos no anel toroidal (Toro Vertical)
         up_neighbor = (rank - 1) % size
         down_neighbor = (rank + 1) % size
         
-        # Buffers para receber as bordas fantasmas
+        # Buffers para receber as linhas fantasmas dos vizinhos
         ghost_top = np.empty(self.local_w, dtype=np.uint8)
         ghost_bottom = np.empty(self.local_w, dtype=np.uint8)
         
-        # Envia minha linha de CIMA (índice 0), Recebe linha de BAIXO do vizinho de CIMA
-        # (Espera... Se eu sou Rank 1, meu vizinho de cima é 0. 
-        # Eu envio meu topo pra ele. Ele me envia o fundo dele, que vira meu fantasma superior)
-        
+        # Trocas não-bloqueantes (Isend/Irecv) para melhor performance
+        # Cada processo envia sua borda superior ao vizinho superior e recebe a borda inferior do vizinho inferior
+        # Simultaneamente envia a borda inferior ao vizinho inferior e recebe a borda superior do vizinho superior
         req1 = comm.Isend(self.cells[0, :], dest=up_neighbor, tag=11)
         req2 = comm.Irecv(ghost_bottom, source=down_neighbor, tag=11)
         req3 = comm.Isend(self.cells[-1, :], dest=down_neighbor, tag=22)
@@ -84,63 +92,48 @@ class Grille:
         MPI.Request.Waitall([req1, req2, req3, req4])
         
         # --- PASSO 2: Construir Matriz Expandida (com Ghost Cells) ---
-        # Matriz local + 2 linhas (uma em cima, uma em baixo)
+        # Combinamos: linha fantasma superior + dados locais + linha fantasma inferior
         expanded_cells = np.vstack([ghost_top, self.cells, ghost_bottom])
         
-        # --- PASSO 3: Cálculo (Convolução) ---
-        C = np.ones((3,3))
-        C[1,1] = 0
+        # --- PASSO 3: Cálculo Vetorizado (Convolução 2D) ---
+        # Kernel 3x3 de uns (convolução para contar vizinhos)
+        C = np.ones((3, 3))
+        C[1, 1] = 0  # Não contamos a célula central
         
-        # Truque: Usamos 'boundary=wrap' APENAS para as laterais (Toro Horizontal).
-        # Para o vertical, já temos as ghost cells, então não precisamos que o convolve2d faça wrap vertical.
-        # Mas o convolve2d faz wrap em ambos ou nenhum. 
-        # Solução: Como já temos ghost cells verticais, usamos boundary='wrap'. 
-        # O wrap vertical será redundante (vai pegar a ghost cell e jogar pro outro lado), mas o 'mode=valid' vai cortar isso fora.
-        
-        voisins = convolve2d(expanded_cells, C, mode='valid', boundary='wrap')
-        
-        # O 'mode=valid' com kernel 3x3 reduz a dimensão em 2 linhas e 2 colunas.
-        # Como adicionamos 2 linhas (ghosts), a altura volta ao normal (local_h).
-        # Porém, a largura perdeu 2 colunas porque não adicionamos ghosts laterais (confiamos no wrap).
-        # ERRO COMUM: convolve2d com 'valid' não faz wrap horizontal.
-        # CORREÇÃO: Vamos usar 'same' na matriz expandida e depois cortar o meio.
-        
+        # A convolução com 'boundary=wrap' cria toro nas laterais (direita-esquerda)
+        # A dimensão vertical é gerenciada pelas ghost cells
         voisins = convolve2d(expanded_cells, C, mode='same', boundary='wrap')
         
-        # Cortar as ghost cells (primeira e última linha) para voltar ao tamanho local
+        # Remover as linhas de ghost cells do resultado para voltar ao tamanho local
         voisins = voisins[1:-1, :]
         
-        # Aplicar regras
-        # Lógica vetorial otimizada
-        # Célula viva (1) continua viva se tiver 2 ou 3 vizinhos
-        # Célula morta (0) nasce se tiver 3 vizinhos
+        # --- PASSO 4: Aplicar Regras do Game of Life (Vetorizado) ---
+        # Uma célula viva (1) sobrevive se tiver 2 ou 3 vizinhos
+        # Uma célula morta (0) nasce se tiver exatamente 3 vizinhos
         next_cells = np.zeros(self.cells.shape, dtype=np.uint8)
         next_cells[(self.cells == 1) & ((voisins == 2) | (voisins == 3))] = 1
         next_cells[(self.cells == 0) & (voisins == 3)] = 1
         
         self.cells = next_cells
-        return [] # diff_cells não usado aqui
+        return []
 
     def get_global_grid(self):
-        """ Reúne a grelha no Rank 0 para desenho """
-        # Gather (inverso do Scatter)
-        if rank == 0:
-            full_grid = np.zeros(self.global_dim, dtype=np.uint8)
-        else:
-            full_grid = None
-            
-        # Nota: Gather espera receber em lista de chunks se tamanhos iguais
-        # Gatherv é mais seguro, mas para divisão exata Gather funciona com numpy buffers
-        # O mpi4py com numpy faz o gather automaticamente concatenando se usarmos a sintaxe correta
-        
-        # Opção segura: Gather devolve lista de arrays no rank 0
+        """ 
+        Reúne (Gather) a grelha distribuída no Rank 0 para visualização.
+        Usa o método gather do MPI que concatena automaticamente os dados de cada processo.
+        Retorna a grelha global completa no Rank 0, None nos outros processos.
+        """
+        # Usar gather para recolher dados de todos os processos no rank 0
+        # O mpi4py com numpy devolve uma lista de arrays no rank 0
         recv_list = comm.gather(self.cells, root=0)
         
         if rank == 0:
+            # Concatenar verticalmente as partes de cada processo
             full_grid = np.vstack(recv_list)
             self.global_cells = full_grid
-            
-        return self.global_cells
+            return full_grid
+        else:
+            return None
 
 class App:
     """ Mantive sua classe App quase idêntica, mas otimizei o draw """
