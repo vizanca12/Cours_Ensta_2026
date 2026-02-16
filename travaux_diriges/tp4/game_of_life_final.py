@@ -1,5 +1,6 @@
 """
-Jeu de la vie - Análise de População (Sem Interface Gráfica)
+Jeu de la vie - Análise de População com Vetorização (Sem Interface Gráfica)
+Versão otimizada usando convolve2d da scipy para cálculos vetorizados.
 """
 from mpi4py import MPI
 import numpy as np
@@ -39,31 +40,59 @@ class Grille:
         self.cells = np.zeros(self.local_dim, dtype=np.uint8)
         comm.Scatter(self.global_cells, self.cells, root=0)
 
+    @staticmethod        
+    def h(x):
+        """
+        Aplica as regras do jogo de la vida usando operações vetorizadas.
+        Entrada: x é a matriz contendo o número de vizinhos vivos de cada célula.
+        Saída: Matriz de mudanças a aplicar (combinada com estado atual da célula).
+        """
+        x[x <= 1] = -1    # Morre por subpopulação
+        x[x >= 4] = -1    # Morre por superpopulação
+        x[x == 2] = 0     # Mantém estado (para células vivas)
+        x[x == 3] = 1     # Nasce ou permanece viva
+        return x
+
     def compute_next_iteration(self):
-        # 1. Halo Exchange
+        """
+        Versão vetorizada com MPI usando Ghost Cells (Halo Exchange)
+        Aplicação das regras do Game of Life através de convolução.
+        """
+        # 1. Halo Exchange - Troca de linhas nas bordas
         up_neighbor = (rank - 1) % size
         down_neighbor = (rank + 1) % size
         ghost_top = np.empty(self.local_w, dtype=np.uint8)
         ghost_bottom = np.empty(self.local_w, dtype=np.uint8)
         
+        # Trocas não-bloqueantes de linhas fantasmas
         req1 = comm.Isend(self.cells[0, :], dest=up_neighbor, tag=11)
         req2 = comm.Irecv(ghost_bottom, source=down_neighbor, tag=11)
         req3 = comm.Isend(self.cells[-1, :], dest=down_neighbor, tag=22)
         req4 = comm.Irecv(ghost_top, source=up_neighbor, tag=22)
         MPI.Request.Waitall([req1, req2, req3, req4])
         
-        # 2. Compute
+        # 2. Expandir matriz com ghost cells (simula toro vertical)
         expanded = np.vstack([ghost_top, self.cells, ghost_bottom])
-        C = np.ones((3,3)); C[1,1] = 0
+        
+        # 3. Convolução para contar vizinhos (otimização vetorizada)
+        C = np.ones((3, 3))
+        C[1, 1] = 0  # Não contamos a célula central
         voisins = convolve2d(expanded, C, mode='same', boundary='wrap')[1:-1, :]
         
+        # 4. Aplicar regras do Game of Life de forma vetorizada
+        # Uma célula viva sobrevive com 2 ou 3 vizinhos vivos
+        # Uma célula morta nasce com exatamente 3 vizinhos vivos
         next_cells = np.zeros_like(self.cells)
         next_cells[(self.cells == 1) & ((voisins == 2) | (voisins == 3))] = 1
         next_cells[(self.cells == 0) & (voisins == 3)] = 1
+        
         self.cells = next_cells
 
     def get_population_count(self):
-        """ Conta células vivas globalmente usando MPI Reduce """
+        """ 
+        Conta células vivas globalmente usando MPI Reduce.
+        Realiza uma redução MPI para somar as populações locais.
+        """
         # 1. Conta localmente
         local_count = np.sum(self.cells)
         
@@ -71,7 +100,7 @@ class Grille:
         global_count = np.array(0, dtype='i') if rank == 0 else None
         local_count_arr = np.array(local_count, dtype='i')
         
-        # 3. A Mágica do MPI: Soma tudo num passo só
+        # 3. Redução MPI: Soma tudo num passo só
         comm.Reduce(local_count_arr, global_count, op=MPI.SUM, root=0)
         
         return global_count

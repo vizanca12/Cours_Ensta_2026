@@ -1,6 +1,6 @@
 """
-Jeu de la vie - Version Parallèle MPI
-Baseado no código original do usuário, adaptado para decomposição de domínio.
+Jeu de la vie - Version parallèle MPI
+Basé sur le code original de l'utilisateur, adapté pour la décomposition du domaine.
 """
 from mpi4py import MPI
 import pygame as pg
@@ -9,7 +9,7 @@ import sys
 import time
 from scipy.signal import convolve2d
 
-# --- Configuração MPI ---
+# --- Configuration MPI ---
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
@@ -20,16 +20,16 @@ class Grille:
         self.col_life = color_life
         self.col_dead = color_dead
         
-        # 1. Decomposição de Domínio
+        # 1. Décomposition du domaine
         if dim[0] % size != 0:
-            if rank == 0: print("Erro: A altura deve ser divisível pelo número de processos.")
+            if rank == 0: print("Erreur : la hauteur doit être divisible par le nombre de processus.")
             sys.exit(1)
             
         self.local_h = dim[0] // size
         self.local_w = dim[1]
         self.local_dim = (self.local_h, self.local_w)
         
-        # 2. Inicialização Global (Apenas no Rank 0)
+        # 2. Initialisation globale (seulement sur le rang 0)
         self.global_cells = None # Garante que existe em todos os ranks
         if rank == 0:
             if init_pattern is not None:
@@ -40,110 +40,103 @@ class Grille:
             else:
                 self.global_cells = np.random.randint(2, size=dim, dtype=np.uint8)
 
-        # 3. Distribuição (Scatter)
-        # Prepara o buffer local
+        # 3. Distribution (Scatter)
+        # Prépare le buffer local
         self.cells = np.zeros(self.local_dim, dtype=np.uint8)
         
-        # CORREÇÃO AQUI: Passamos a matriz inteira. O Scatter divide sozinho.
-        # Sendbuf: (buffer, count, type) ou apenas buffer se for divisão igual
-        # O mpi4py divide o primeiro eixo (linhas) automaticamente.
+        # CORRECTION ICI : Nous passons la matrice entière. Le Scatter la divise lui-même.
+        # Sendbuf: (buffer, count, type) ou simplement le buffer si la division est égale
+        # mpi4py divise automatiquement le premier axe (lignes).
         comm.Scatter(self.global_cells, self.cells, root=0)
 
     @staticmethod        
     def h(x):
-        # Regras do jogo aplicadas ao resultado da convolução
-        # x é a matriz de vizinhos
-        x[x<=1] = -1  # Morre por subpopulação (nota: seu código original usava lógica diferente aqui, mantive a ideia)
-        x[x>=4] = -1  # Morre por superpopulação
-        x[x==2] = 0   # Mantém estado
-        x[x==3] = 1   # Nasce
+        """
+        Applique les règles du Jeu de la vie en utilisant des opérations vectorisées.
+        Entrée: x est la matrice contenant le nombre de voisins vivants de chaque cellule.
+        Sortie: Matrice des changements à appliquer.
+        Règles:
+        - Cellules avec <=1 voisin : meurent par sous-population
+        - Cellules avec >=4 voisins : meurent par sur-population
+        - Cellules avec 2 voisins : conservent leur état
+        - Cellules avec 3 voisins : naissent ou restent vivantes
+        """
+        x[x <= 1] = -1   # Meurt par sous-population
+        x[x >= 4] = -1   # Meurt par sur-population
+        x[x == 2] = 0    # Conserve l'état
+        x[x == 3] = 1    # Naît
         return x
 
     def compute_next_iteration(self):
         """
-        Versão MPI com Ghost Cells
+        Version MPI avec cellules fantômes (échange halo) et convolution vectorisée.
+        Implémente la décomposition du domaine avec échanges asynchrones de bords.
         """
-        # --- PASSO 1: Troca de Ghost Cells (Halo Exchange) ---
-        # Vizinhos no anel (Toro Vertical)
+        # --- ÉTAPE 1 : Échange des cellules fantômes (Halo Exchange) ---
+        # Voisins dans l'anneau toroïdal (tore vertical)
         up_neighbor = (rank - 1) % size
         down_neighbor = (rank + 1) % size
-        
-        # Buffers para receber as bordas fantasmas
+
+        # Buffers pour recevoir les lignes fantômes des voisins
         ghost_top = np.empty(self.local_w, dtype=np.uint8)
         ghost_bottom = np.empty(self.local_w, dtype=np.uint8)
-        
-        # Envia minha linha de CIMA (índice 0), Recebe linha de BAIXO do vizinho de CIMA
-        # (Espera... Se eu sou Rank 1, meu vizinho de cima é 0. 
-        # Eu envio meu topo pra ele. Ele me envia o fundo dele, que vira meu fantasma superior)
-        
+
+        # Échanges non bloquants (Isend/Irecv) pour de meilleures performances
+        # Chaque processus envoie sa bordure supérieure au voisin supérieur et reçoit la bordure inférieure
+        # Simultanément, envoie la bordure inférieure au voisin inférieur et reçoit la bordure supérieure
         req1 = comm.Isend(self.cells[0, :], dest=up_neighbor, tag=11)
         req2 = comm.Irecv(ghost_bottom, source=down_neighbor, tag=11)
         req3 = comm.Isend(self.cells[-1, :], dest=down_neighbor, tag=22)
         req4 = comm.Irecv(ghost_top, source=up_neighbor, tag=22)
-        
+
         MPI.Request.Waitall([req1, req2, req3, req4])
         
-        # --- PASSO 2: Construir Matriz Expandida (com Ghost Cells) ---
-        # Matriz local + 2 linhas (uma em cima, uma em baixo)
+        # --- ÉTAPE 2 : Construire la matrice étendue (avec cellules fantômes) ---
+        # On combine : ligne fantôme supérieure + données locales + ligne fantôme inférieure
         expanded_cells = np.vstack([ghost_top, self.cells, ghost_bottom])
         
-        # --- PASSO 3: Cálculo (Convolução) ---
-        C = np.ones((3,3))
-        C[1,1] = 0
-        
-        # Truque: Usamos 'boundary=wrap' APENAS para as laterais (Toro Horizontal).
-        # Para o vertical, já temos as ghost cells, então não precisamos que o convolve2d faça wrap vertical.
-        # Mas o convolve2d faz wrap em ambos ou nenhum. 
-        # Solução: Como já temos ghost cells verticais, usamos boundary='wrap'. 
-        # O wrap vertical será redundante (vai pegar a ghost cell e jogar pro outro lado), mas o 'mode=valid' vai cortar isso fora.
-        
-        voisins = convolve2d(expanded_cells, C, mode='valid', boundary='wrap')
-        
-        # O 'mode=valid' com kernel 3x3 reduz a dimensão em 2 linhas e 2 colunas.
-        # Como adicionamos 2 linhas (ghosts), a altura volta ao normal (local_h).
-        # Porém, a largura perdeu 2 colunas porque não adicionamos ghosts laterais (confiamos no wrap).
-        # ERRO COMUM: convolve2d com 'valid' não faz wrap horizontal.
-        # CORREÇÃO: Vamos usar 'same' na matriz expandida e depois cortar o meio.
-        
+        # --- ÉTAPE 3 : Calcul vectorisé (convolution 2D) ---
+        # Noyau 3x3 de uns (convolution pour compter les voisins)
+        C = np.ones((3, 3))
+        C[1, 1] = 0  # On ne compte pas la cellule centrale
+
+        # La convolution avec 'boundary=wrap' crée un tore sur les côtés (droite-gauche)
+        # La dimension verticale est gérée par les cellules fantômes
         voisins = convolve2d(expanded_cells, C, mode='same', boundary='wrap')
         
-        # Cortar as ghost cells (primeira e última linha) para voltar ao tamanho local
+        # Retirer les lignes de cellules fantômes du résultat pour revenir à la taille locale
         voisins = voisins[1:-1, :]
         
-        # Aplicar regras
-        # Lógica vetorial otimizada
-        # Célula viva (1) continua viva se tiver 2 ou 3 vizinhos
-        # Célula morta (0) nasce se tiver 3 vizinhos
+        # --- ÉTAPE 4 : Appliquer les règles du Jeu de la vie (vectorisé) ---
+        # Une cellule vivante (1) survit si elle a 2 ou 3 voisins
+        # Une cellule morte (0) naît si elle a exactement 3 voisins
         next_cells = np.zeros(self.cells.shape, dtype=np.uint8)
         next_cells[(self.cells == 1) & ((voisins == 2) | (voisins == 3))] = 1
         next_cells[(self.cells == 0) & (voisins == 3)] = 1
         
         self.cells = next_cells
-        return [] # diff_cells não usado aqui
+        return []
 
     def get_global_grid(self):
-        """ Reúne a grelha no Rank 0 para desenho """
-        # Gather (inverso do Scatter)
-        if rank == 0:
-            full_grid = np.zeros(self.global_dim, dtype=np.uint8)
-        else:
-            full_grid = None
-            
-        # Nota: Gather espera receber em lista de chunks se tamanhos iguais
-        # Gatherv é mais seguro, mas para divisão exata Gather funciona com numpy buffers
-        # O mpi4py com numpy faz o gather automaticamente concatenando se usarmos a sintaxe correta
-        
-        # Opção segura: Gather devolve lista de arrays no rank 0
+        """
+        Rassemble (Gather) la grille distribuée sur le rang 0 pour la visualisation.
+        Utilise la méthode gather du MPI qui concatène automatiquement les données de chaque processus.
+        Retourne la grille globale complète sur le rang 0, None sur les autres processus.
+        """
+        # Utiliser gather pour rassembler les données de tous les processus sur le rang 0
+        # mpi4py avec numpy renvoie une liste de tableaux sur le rang 0
         recv_list = comm.gather(self.cells, root=0)
         
         if rank == 0:
+            # Concaténer verticalement les parties de chaque processus
             full_grid = np.vstack(recv_list)
             self.global_cells = full_grid
-            
-        return self.global_cells
+            return full_grid
+        else:
+            return None
 
 class App:
-    """ Mantive sua classe App quase idêntica, mas otimizei o draw """
+    """J'ai gardé la classe App presque identique, mais j'ai optimisé le dessin."""
     def __init__(self, geometry, grid):
         self.grid = grid
         self.size_x = geometry[1]//grid.global_dim[1]
@@ -155,32 +148,26 @@ class App:
         self.col_life = grid.col_life
 
     def draw(self):
-        # OTIMIZAÇÃO CRÍTICA: Se não usar isso, o display será o gargalo, não o cálculo.
-        # Convertemos a matriz numpy diretamente para pixels surface
-        # Mapeamento simples: 0 -> cor morta, 1 -> cor viva
-        
-        # Pegar grelha global atualizada
+        # OPTIMISATION CRITIQUE : Si on n'utilise pas cela, l'affichage sera le goulot d'étranglement, pas le calcul.
+        # Nous convertissons la matrice numpy directement en surface de pixels
+        # Mappage simple : 0 -> couleur morte, 1 -> couleur vivante
+
+        # Récupérer la grille globale mise à jour
         matrix = self.grid.global_cells
-        
-        # Criar array de cores (Transposta porque o Pygame usa (x, y) e numpy usa (row, col))
-        # Se matrix é (rows, cols), pygame quer (width, height) = (cols, rows)
-        matrix_T = matrix.T 
-        
-        # Construir superfície RGB
+
+        # Créer un tableau de couleurs (transposée car Pygame utilise (x, y) et numpy utilise (ligne, colonne))
+        # Si matrix est (lignes, colonnes), pygame veut (largeur, hauteur) = (colonnes, lignes)
+        matrix_T = matrix.T
+
+        # Construire la surface RGB (optionnel si on dessine par blocs)
         surf_array = np.zeros((self.width, self.height, 3), dtype=np.uint8)
-        
-        # Preencher (simplificado para blocos sólidos é difícil sem loop, 
-        # mas podemos usar escala se 1 pixel = 1 célula)
-        
-        # Método Híbrido Rápido: Desenhar retângulos ainda é lento, 
-        # mas vamos manter seu método original se quiser medir a lentidão, 
-        # ou usar este método rápido:
-        
+
+        # Méthode hybride rapide : dessiner uniquement les cellules vivantes
         self.screen.fill(self.col_dead)
-        # Obter coordenadas das células vivas
+        # Obtenir les coordonnées des cellules vivantes
         rows, cols = np.where(matrix == 1)
-        
-        # Desenhar apenas as vivas (muito mais rápido que desenhar todas)
+
+        # Dessiner uniquement les vivantes (beaucoup plus rapide que dessiner toutes)
         for r, c in zip(rows, cols):
             rect = (c * self.size_x, r * self.size_y, self.size_x, self.size_y)
             pg.draw.rect(self.screen, self.col_life, rect)
@@ -217,27 +204,27 @@ if __name__ == '__main__':
 
     # Apenas Rank 0 imprime infos
     if rank == 0:
-        print(f"Pattern initial choisi : {choice}")
-        print(f"resolution ecran : {resx,resy}")
-        pg.init() # Init pygame apenas no mestre
+        print(f"Motif initial choisi : {choice}")
+        print(f"résolution écran : {resx,resy}")
+        pg.init() # Initialiser pygame seulement sur le maître
     
     try:
         init_pattern = dico_patterns[choice]
     except KeyError:
-        if rank == 0: print("No such pattern. Available ones are:", dico_patterns.keys())
+        if rank == 0: print("Motif inconnu. Les motifs disponibles sont :", dico_patterns.keys())
         sys.exit(1)
 
-    # 1. Criar Grid (Todos os processos criam sua parte local)
+    # 1. Créer la grille (tous les processus créent leur partie locale)
     grid = Grille(*init_pattern)
-    
-    # 2. Criar App (Apenas Rank 0)
+
+    # 2. Créer l'application (seulement sur le rang 0)
     appli = None
     if rank == 0:
         appli = App((resx, resy), grid)
 
     mustContinue = True
     while mustContinue:
-        # Sincronização de tempo (opcional, para medir performance correta)
+        # Synchronisation temporelle (optionnelle, pour mesurer correctement la performance)
         comm.Barrier()
         t1 = time.time()
         
@@ -251,14 +238,14 @@ if __name__ == '__main__':
         if rank == 0:
             appli.draw()
             t3 = time.time()
-            
-            # Eventos Pygame
+
+            # Événements Pygame
             for event in pg.event.get():
                 if event.type == pg.QUIT:
                     mustContinue = False
-            
-            # Print performance
-            print(f"Calc: {t2-t1:2.2e}s | Affich: {t3-t2:2.2e}s\r", end='')
+
+            # Afficher les performances
+            print(f"Calc: {t2-t1:2.2e}s | Affichage: {t3-t2:2.2e}s\r", end='')
 
         # Sincronizar decisão de sair
         # Se Rank 0 decidiu sair (mustContinue=False), avisa os outros
