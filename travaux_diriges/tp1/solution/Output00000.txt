@@ -1,0 +1,3 @@
+Nombre d'echantillpons a produire : 100000000
+approximation de pi : 3.14139
+Temps de calcul : 1.43191s

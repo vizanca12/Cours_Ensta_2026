@@ -54,6 +54,16 @@ public:
         return m_map_of_pheronome[( i + 1 ) * m_stride + ( j + 1 )];
     }
 
+    // Surcharge pour indices signés: permet d'adresser les cellules fantômes (-1 et dim)
+    // en restant dans le buffer [0..dim+1].
+    pheronome_t& operator( )( int i, int j ) {
+        return m_map_of_pheronome[static_cast<size_t>( i + 1 ) * m_stride + static_cast<size_t>( j + 1 )];
+    }
+
+    const pheronome_t& operator( )( int i, int j ) const {
+        return m_map_of_pheronome[static_cast<size_t>( i + 1 ) * m_stride + static_cast<size_t>( j + 1 )];
+    }
+
     pheronome_t& operator[] ( const position_t& pos ) {
       return m_map_of_pheronome[index(pos)];
     }
@@ -62,7 +72,28 @@ public:
       return m_map_of_pheronome[index(pos)];
     }
 
+    // --- Helpers for MPI / instrumentation ---
+    // Layout: contiguous doubles (2 per cell) over (dim+2)*(dim+2) cells.
+    double* raw_map_doubles() { return reinterpret_cast<double*>(m_map_of_pheronome.data()); }
+    const double* raw_map_doubles() const { return reinterpret_cast<const double*>(m_map_of_pheronome.data()); }
+    std::size_t raw_map_doubles_count() const { return m_map_of_pheronome.size() * 2; }
+
+    void set_map_from_raw_doubles(const double* src)
+    {
+        std::copy(src, src + raw_map_doubles_count(), raw_map_doubles());
+    }
+
+    void sync_buffer_from_map()
+    {
+        if (m_buffer_pheronome.size() != m_map_of_pheronome.size())
+            m_buffer_pheronome.resize(m_map_of_pheronome.size());
+        #pragma omp parallel for schedule(static)
+        for (size_t k = 0; k < m_map_of_pheronome.size(); ++k)
+            m_buffer_pheronome[k] = m_map_of_pheronome[k];
+    }
+
     void do_evaporation( ) {
+        #pragma omp parallel for collapse(2) schedule(static)
         for ( std::size_t i = 1; i <= m_dim; ++i )
             for ( std::size_t j = 1; j <= m_dim; ++j ) {
                 m_buffer_pheronome[i * m_stride + j][0] *= m_beta;
@@ -71,12 +102,12 @@ public:
     }
 
     void mark_pheronome( const position_t& pos ) {
-      std::size_t i = pos.x;
-      std::size_t j = pos.y;
-        assert( i >= 0 );
-        assert( j >= 0 );
-        assert( i < m_dim );
-        assert( j < m_dim );
+                int i = pos.x;
+                int j = pos.y;
+                assert( i >= 0 );
+                assert( j >= 0 );
+                assert( static_cast<unsigned long>(i) < m_dim );
+                assert( static_cast<unsigned long>(j) < m_dim );
         pheronome&         phen        = *this;
         const pheronome_t& left_cell   = phen( i - 1, j );
         const pheronome_t& right_cell  = phen( i + 1, j );
@@ -90,19 +121,27 @@ public:
         double             v2_upper    = std::max( upper_cell[1], 0. );
         double             v1_bottom   = std::max( bottom_cell[0], 0. );
         double             v2_bottom   = std::max( bottom_cell[1], 0. );
-        m_buffer_pheronome[( i + 1 ) * m_stride + ( j + 1 )][0] =
+        const size_t idx = static_cast<size_t>( i + 1 ) * m_stride + static_cast<size_t>( j + 1 );
+        m_buffer_pheronome[idx][0] =
             m_alpha * std::max( {v1_left, v1_right, v1_upper, v1_bottom} ) +
             ( 1 - m_alpha ) * 0.25 * ( v1_left + v1_right + v1_upper + v1_bottom );
-        m_buffer_pheronome[( i + 1 ) * m_stride + ( j + 1 )][1] =
+        m_buffer_pheronome[idx][1] =
             m_alpha * std::max( {v2_left, v2_right, v2_upper, v2_bottom} ) +
             ( 1 - m_alpha ) * 0.25 * ( v2_left + v2_right + v2_upper + v2_bottom );
     }
 
     void update( ) {
+        update_no_sync();
+        // Garantit que le buffer utilisé au pas suivant part bien de l'état courant.
+        sync_buffer_from_map();
+    }
+
+    // Variante utilisée par MPI: on peut faire un merge global (MAX) puis synchroniser une seule fois.
+    void update_no_sync( ) {
         m_map_of_pheronome.swap( m_buffer_pheronome );
         cl_update( );
-        m_map_of_pheronome[( m_pos_food.x + 1 ) * m_stride + m_pos_food.y + 1][0] = 1;
-        m_map_of_pheronome[( m_pos_nest.x + 1 ) * m_stride + m_pos_nest.y + 1][1] = 1;
+        m_map_of_pheronome[static_cast<size_t>( m_pos_food.x + 1 ) * m_stride + static_cast<size_t>( m_pos_food.y + 1 )][0] = 1;
+        m_map_of_pheronome[static_cast<size_t>( m_pos_nest.x + 1 ) * m_stride + static_cast<size_t>( m_pos_nest.y + 1 )][1] = 1;
     }
 
 private:

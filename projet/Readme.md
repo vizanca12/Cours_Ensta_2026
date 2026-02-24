@@ -95,6 +95,39 @@ Une fois toutes les valeurs générées, on les normalise pour obtenir une carte
 
 Mesurer et noter le temps passé dans les différentes parties du code.
 
+### Reproductibilité / mode benchmark
+
+Pour mesurer correctement les performances (sans dépendre de SDL/GUI), le binaire accepte :
+
+- `--no-gui` : désactive l'affichage SDL
+- `--steps N` : exécute exactement N itérations
+
+Exemple :
+
+- `OMP_NUM_THREADS=1 ./src/ant_simu.exe --no-gui --steps 1000`
+
+Un petit outil de benchmark est fourni pour répéter les runs et produire moyenne/écart-type :
+
+- `python3 tools/bench.py --steps 500 --runs 5`
+
+MPI (approche 1) :
+
+- `python3 tools/bench.py --mpi --steps 300 --runs 3 --ranks 1 2 4 --mpi-ants 20000`
+
+Le rapport complet est dans `RAPPORT.md`.
+
+### Génération PDF du rapport
+
+Si `pandoc` est installé **et** une engine PDF est disponible (LaTeX) :
+
+- `pandoc RAPPORT.md -o RAPPORT.pdf`
+
+Remarque : sur certaines machines, une engine LaTeX peut manquer. Dans ce cas :
+
+- Installer une engine (ex.: TeXLive) ou
+- Générer le PDF sur une autre machine (université), ou
+- Utiliser une engine alternative si disponible (ex.: `pandoc ... --pdf-engine=xelatex`).
+
 ## Vectorisation et parallélisation en mémoire partagée du code
 
 ### Vectorisation
