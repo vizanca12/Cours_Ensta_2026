@@ -39,7 +39,7 @@ Décrivons la dynamique du modèle. Au départ :
 
 \'A chaque pas de temps, une fourmi fait deux choses :
 
-1. Elle met à jour les taux de phéronomes $V_{1}(s)$ et $V_{2}(s)$ de la cellule sur   laquelle elle se trouve en utilisant celles des quatre cellules voisines ( on note $N(s)$ les voisins de $s$ ). La mise à jour des taux de phéronomes requiert uniquement la connaissance du maximum et de la moyenne des cellules voisines : $\max_{i}\left(N(s)\right) \equiv \max_{s'\in N(s)}V_{i}(s')$ et $avg_{i}\left(N(s)\right)\equiv\frac{1}{4} \sum_{s'\in N(s)} V_{i}(s')$ où l'indice $i\in\left\{1,2\right\}$ indique le type de phéronome considéré.  Précisément, la mise à jour des phéronomes se fait selon les calculs suivants :
+1. Elle met à jour les taux de phéronomes $V_{1}(s)$ et $V_{2}(s)$ de la cellule sur   laquelle elle se trouve en utilisant celles des quatre cellules voisines ( on note $N(s)$ les voisins de $s$ ). La mise à jour des taux de phéronomes requiert uniquement la connaissance du maximum et de la moyenne des cellules voisines : $\max_{i}\left(N(s)\right) \equiv \max_{s'\in N(s)}V_{i}(s')$ et $avg_{i}\left(N(s)\right)\equiv\frac{1}{4} \sum_{s'\in N(s)} V_{i}(s')$ où l'indice $i\in\lbrace 1,2\rbrace$ indique le type de phéronome considéré.  Précisément, la mise à jour des phéronomes se fait selon les calculs suivants :
 
 $$
    V_{1}(s) \rightarrow \left\{\begin{array}{ll}
