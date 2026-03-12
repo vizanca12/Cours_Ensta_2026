@@ -30,7 +30,7 @@ ant_simu_mpi.o : ant_simu_mpi.cpp
 	$(MPICXX) $(CXXFLAGS2) -c $^ -o $@
 
 ant_simu_mpi.exe : ant.o fractal_land.o ant_simu_mpi.o
-	$(MPICXX) $(CXXFLAGS2) $^ -o $@ $(LIB)
+	$(MPICXX) $(CXXFLAGS2) $^ -o $@ $(B)
 
 help:
 	@echo "Available targets : "

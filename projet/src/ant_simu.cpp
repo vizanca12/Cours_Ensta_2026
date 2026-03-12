@@ -94,11 +94,15 @@ void advance_time_timed_soa( const fractal_land& land, pheronome& phen,
                              AntSoA& ants, std::size_t& cpteur,
                              double eps, Timings& timings )
 {
+    constexpr double k_min_step_cost = 1e-3;
+    constexpr int k_max_substeps = 4096;
+    constexpr int k_max_random_tries = 64;
     using clock = std::chrono::steady_clock;
     auto t0 = clock::now();
     for ( std::size_t idx = 0; idx < ants.size(); ++idx ) {
         double consumed_time = 0.0;
-        while ( consumed_time < 1.0 ) {
+        int substeps = 0;
+        while ( ( consumed_time < 1.0 ) && ( substeps < k_max_substeps ) ) {
             const int ind_pher = ( ants.loaded[idx] ? 1 : 0 );
             const double choix = rand_double( 0., 1., ants.seed[idx] );
             const int old_x = ants.x[idx];
@@ -115,7 +119,8 @@ void advance_time_timed_soa( const fractal_land& land, pheronome& phen,
 
             if ( ( choix > eps ) || ( max_phen <= 0. ) ) {
                 position_t trial{old_x, old_y};
-                do {
+                bool found = false;
+                for ( int tries = 0; tries < k_max_random_tries; ++tries ) {
                     trial.x = old_x;
                     trial.y = old_y;
                     const int d = rand_int32( 1, 4, ants.seed[idx] );
@@ -123,7 +128,15 @@ void advance_time_timed_soa( const fractal_land& land, pheronome& phen,
                     if ( d == 2 ) trial.y -= 1;
                     if ( d == 3 ) trial.x += 1;
                     if ( d == 4 ) trial.y += 1;
-                } while ( phen[trial][ind_pher] == -1 );
+                    if ( phen[trial][ind_pher] != -1 ) {
+                        found = true;
+                        break;
+                    }
+                }
+                if ( !found ) {
+                    trial.x = old_x;
+                    trial.y = old_y;
+                }
                 new_x = trial.x;
                 new_y = trial.y;
             } else {
@@ -137,7 +150,10 @@ void advance_time_timed_soa( const fractal_land& land, pheronome& phen,
                     new_y += 1;
             }
 
-            consumed_time += land( static_cast<unsigned long>(new_x), static_cast<unsigned long>(new_y) );
+            consumed_time += std::max(
+                land( static_cast<unsigned long>(new_x), static_cast<unsigned long>(new_y) ),
+                k_min_step_cost );
+            ++substeps;
             position_t new_pos{new_x, new_y};
             phen.mark_pheronome( new_pos );
             ants.x[idx] = new_x;
