@@ -1,6 +1,7 @@
 // ant.hpp
 #ifndef _ANT_HPP_
 # define _ANT_HPP_
+# include <vector>
 # include <utility>
 # include "pheronome.hpp"
 # include "fractal_land.hpp"
@@ -27,7 +28,8 @@ public:
     static void set_exploration_coef(double eps) { m_eps = eps; }
 
     void advance( pheronome& phen, const fractal_land& land,
-                  const position_t& pos_food, const position_t& pos_nest, std::size_t& cpteur_food );
+                  const position_t& pos_food, const position_t& pos_nest,
+                  std::size_t& cpteur_food, std::vector<position_t>* pheromone_marks = nullptr );
 
 private:
     static double m_eps; // Coefficient d'exploration commun à toutes les fourmis.

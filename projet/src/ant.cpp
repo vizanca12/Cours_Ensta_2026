@@ -5,7 +5,7 @@
 double ant::m_eps = 0.;
 
 void ant::advance( pheronome& phen, const fractal_land& land, const position_t& pos_food, const position_t& pos_nest,
-                   std::size_t& cpteur_food ) 
+                   std::size_t& cpteur_food, std::vector<position_t>* pheromone_marks ) 
 {
     constexpr double k_min_step_cost = 1e-3;
     constexpr int k_max_substeps = 4096;
@@ -55,7 +55,11 @@ void ant::advance( pheronome& phen, const fractal_land& land, const position_t& 
         }
         consumed_time += std::max( land( new_pos_ant.x, new_pos_ant.y), k_min_step_cost );
         ++substeps;
-        phen.mark_pheronome( new_pos_ant );
+        if ( pheromone_marks != nullptr ) {
+            pheromone_marks->push_back( new_pos_ant );
+        } else {
+            phen.mark_pheronome( new_pos_ant );
+        }
         m_position = new_pos_ant;
         if ( get_position( ) == pos_nest ) {
             if ( is_loaded( ) ) {

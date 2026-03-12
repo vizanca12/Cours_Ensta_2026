@@ -3,6 +3,7 @@
 #include <string>
 #include <chrono>
 #include <random>
+#include <omp.h>
 #include "fractal_land.hpp"
 #include "ant.hpp"
 #include "pheronome.hpp"
@@ -66,8 +67,30 @@ void advance_time_timed( const fractal_land& land, pheronome& phen,
 {
     using clock = std::chrono::steady_clock;
     auto t0 = clock::now();
-    for ( std::size_t i = 0; i < ants.size(); ++i )
-        ants[i].advance(phen, land, pos_food, pos_nest, cpteur);
+
+    std::vector<std::vector<position_t>> marks_per_thread(static_cast<std::size_t>(omp_get_max_threads()));
+    std::vector<std::size_t> food_per_thread(static_cast<std::size_t>(omp_get_max_threads()), 0);
+
+#pragma omp parallel
+    {
+        const int tid = omp_get_thread_num();
+        auto& local_marks = marks_per_thread[static_cast<std::size_t>(tid)];
+        std::size_t local_food = 0;
+
+#pragma omp for schedule(static)
+        for ( std::size_t i = 0; i < ants.size(); ++i )
+            ants[i].advance(phen, land, pos_food, pos_nest, local_food, &local_marks);
+
+        food_per_thread[static_cast<std::size_t>(tid)] = local_food;
+    }
+
+    for (std::size_t food : food_per_thread)
+        cpteur += food;
+
+    for (const auto& marks : marks_per_thread)
+        for (const auto& pos : marks)
+            phen.mark_pheronome(pos);
+
     auto t1 = clock::now();
     phen.do_evaporation();
     auto t2 = clock::now();
@@ -99,76 +122,108 @@ void advance_time_timed_soa( const fractal_land& land, pheronome& phen,
     constexpr int k_max_random_tries = 64;
     using clock = std::chrono::steady_clock;
     auto t0 = clock::now();
-    for ( std::size_t idx = 0; idx < ants.size(); ++idx ) {
-        double consumed_time = 0.0;
-        int substeps = 0;
-        while ( ( consumed_time < 1.0 ) && ( substeps < k_max_substeps ) ) {
-            const int ind_pher = ( ants.loaded[idx] ? 1 : 0 );
-            const double choix = rand_double( 0., 1., ants.seed[idx] );
-            const int old_x = ants.x[idx];
-            const int old_y = ants.y[idx];
-            int new_x = old_x;
-            int new_y = old_y;
+    auto& ants_x = ants.x;
+    auto& ants_y = ants.y;
+    auto& ants_loaded = ants.loaded;
+    auto& ants_seed = ants.seed;
 
-            const double max_phen = std::max({
-                phen( new_x - 1, new_y )[ind_pher],
-                phen( new_x + 1, new_y )[ind_pher],
-                phen( new_x, new_y - 1 )[ind_pher],
-                phen( new_x, new_y + 1 )[ind_pher],
-            });
+    std::vector<std::vector<position_t>> marks_per_thread(static_cast<std::size_t>(omp_get_max_threads()));
+    std::size_t food_delta = 0;
 
-            if ( ( choix > eps ) || ( max_phen <= 0. ) ) {
-                position_t trial{old_x, old_y};
-                bool found = false;
-                for ( int tries = 0; tries < k_max_random_tries; ++tries ) {
-                    trial.x = old_x;
-                    trial.y = old_y;
-                    const int d = rand_int32( 1, 4, ants.seed[idx] );
-                    if ( d == 1 ) trial.x -= 1;
-                    if ( d == 2 ) trial.y -= 1;
-                    if ( d == 3 ) trial.x += 1;
-                    if ( d == 4 ) trial.y += 1;
-                    if ( phen[trial][ind_pher] != -1 ) {
-                        found = true;
-                        break;
+#pragma omp parallel reduction(+ : food_delta)
+    {
+        const int tid = omp_get_thread_num();
+        auto& local_marks = marks_per_thread[static_cast<std::size_t>(tid)];
+
+#pragma omp for schedule(static)
+        for ( std::size_t idx = 0; idx < ants.size(); ++idx ) {
+            int ant_x = ants_x[idx];
+            int ant_y = ants_y[idx];
+            unsigned char ant_loaded = ants_loaded[idx];
+            std::size_t ant_seed = ants_seed[idx];
+            double consumed_time = 0.0;
+            int substeps = 0;
+
+            while ( ( consumed_time < 1.0 ) && ( substeps < k_max_substeps ) ) {
+                const int ind_pher = ( ant_loaded ? 1 : 0 );
+                const double choix = rand_double( 0., 1., ant_seed );
+                const int old_x = ant_x;
+                const int old_y = ant_y;
+                int new_x = ant_x;
+                int new_y = ant_y;
+
+                const double max_phen = std::max({
+                    phen( new_x - 1, new_y )[ind_pher],
+                    phen( new_x + 1, new_y )[ind_pher],
+                    phen( new_x, new_y - 1 )[ind_pher],
+                    phen( new_x, new_y + 1 )[ind_pher],
+                });
+
+                if ( ( choix > eps ) || ( max_phen <= 0. ) ) {
+                    position_t trial{old_x, old_y};
+                    bool found = false;
+                    for ( int tries = 0; tries < k_max_random_tries; ++tries ) {
+                        trial.x = old_x;
+                        trial.y = old_y;
+                        const int d = rand_int32( 1, 4, ant_seed );
+                        if ( d == 1 ) trial.x -= 1;
+                        if ( d == 2 ) trial.y -= 1;
+                        if ( d == 3 ) trial.x += 1;
+                        if ( d == 4 ) trial.y += 1;
+                        if ( phen[trial][ind_pher] != -1 ) {
+                            found = true;
+                            break;
+                        }
                     }
+                    if ( !found ) {
+                        trial.x = old_x;
+                        trial.y = old_y;
+                    }
+                    new_x = trial.x;
+                    new_y = trial.y;
+                } else {
+                    if ( phen( new_x - 1, new_y )[ind_pher] == max_phen )
+                        new_x -= 1;
+                    else if ( phen( new_x + 1, new_y )[ind_pher] == max_phen )
+                        new_x += 1;
+                    else if ( phen( new_x, new_y - 1 )[ind_pher] == max_phen )
+                        new_y -= 1;
+                    else
+                        new_y += 1;
                 }
-                if ( !found ) {
-                    trial.x = old_x;
-                    trial.y = old_y;
+
+                consumed_time += std::max(
+                    land( static_cast<unsigned long>(new_x), static_cast<unsigned long>(new_y) ),
+                    k_min_step_cost );
+                ++substeps;
+                position_t new_pos{new_x, new_y};
+                local_marks.push_back( new_pos );
+                ant_x = new_x;
+                ant_y = new_y;
+
+                if ( new_pos == pos_nest ) {
+                    if ( ant_loaded )
+                        food_delta += 1;
+                    ant_loaded = 0;
                 }
-                new_x = trial.x;
-                new_y = trial.y;
-            } else {
-                if ( phen( new_x - 1, new_y )[ind_pher] == max_phen )
-                    new_x -= 1;
-                else if ( phen( new_x + 1, new_y )[ind_pher] == max_phen )
-                    new_x += 1;
-                else if ( phen( new_x, new_y - 1 )[ind_pher] == max_phen )
-                    new_y -= 1;
-                else
-                    new_y += 1;
+                if ( new_pos == pos_food ) {
+                    ant_loaded = 1;
+                }
             }
 
-            consumed_time += std::max(
-                land( static_cast<unsigned long>(new_x), static_cast<unsigned long>(new_y) ),
-                k_min_step_cost );
-            ++substeps;
-            position_t new_pos{new_x, new_y};
-            phen.mark_pheronome( new_pos );
-            ants.x[idx] = new_x;
-            ants.y[idx] = new_y;
-
-            if ( new_pos == pos_nest ) {
-                if ( ants.loaded[idx] )
-                    cpteur += 1;
-                ants.loaded[idx] = 0;
-            }
-            if ( new_pos == pos_food ) {
-                ants.loaded[idx] = 1;
-            }
+            ants_x[idx] = ant_x;
+            ants_y[idx] = ant_y;
+            ants_loaded[idx] = ant_loaded;
+            ants_seed[idx] = ant_seed;
         }
     }
+
+    cpteur += food_delta;
+
+    for (const auto& marks : marks_per_thread)
+        for (const auto& pos : marks)
+            phen.mark_pheronome(pos);
+
     auto t1 = clock::now();
     phen.do_evaporation();
     auto t2 = clock::now();
