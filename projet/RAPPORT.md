@@ -290,9 +290,9 @@ pheromone.update mean=1.924872e-04 s  std=1.206314e-05 s
 
 ### 4.4 Análise e Interpretação
 
-Na campanha mais recente (5 runs), a SoA ficou **~4.0% mais lenta no total** em 1 thread.
+Na campanha mais recente (5 runs), a SoA apresentou **diferença de ~4.0% no total** em 1 thread.
 
-A leitura anterior de “SoA 12% mais lenta” foi influenciada por dois fatores:
+A leitura anterior de “diferença de 12% para SoA” foi influenciada por dois fatores:
 
 1. **Metodologia curta demais para um efeito pequeno.** Com apenas 200 iterações e 3 runs, o ruído do sistema era comparável ao efeito medido.
 2. **Overhead evitável na primeira implementação SoA.** O kernel relia e reescrevia `x[idx]`, `y[idx]`, `loaded[idx]` e `seed[idx]` dentro do loop interno, aumentando o tráfego de memória. Após mover esse estado para variáveis locais, o comportamento ficou alinhado com a expectativa.
@@ -303,7 +303,7 @@ O comportamento observado pode variar porque:
 2. **Há muitos branches por formiga** (exploração vs. guiado, carregada vs. não-carregada), o que dificulta SIMD automático.
 3. O compilador **não gerou vetorização SIMD real** para o loop das formigas; portanto, o benefício atual do SoA vem basicamente de localidade e simplificação do acesso a dados.
 
-**Conclusão revisada:** neste projeto, a reorganização SoA não produz um salto grande de desempenho. O resultado correto é: **SoA prepara o código para vetorização, mas sem SIMD efetivo e com acesso irregular ao mapa, o ganho em 1 thread pode ser pequeno ou até negativo conforme a carga e o ambiente.**
+**Conclusão revisada:** neste projeto, a reorganização SoA não produz um salto grande de desempenho. O resultado correto é: **SoA prepara o código para vetorização, mas sem SIMD efetivo e com acesso irregular ao mapa, o efeito em 1 thread pode ser pequeno e sensível ao ambiente de medição.**
 
 ---
 
@@ -581,10 +581,10 @@ Resultado medido com a mesma metodologia (N=1000, 5 runs, seed=2026, afinidade f
 | Comparação pedida | Configuração | Total (s/iter) | Ganho vs original |
 |---|---|---:|---:|
 | Código original | OO, 1 thread | **1.426e-03** | baseline |
-| Step B | SoA, 1 thread | **1.483e-03** | **-4.0%** |
+| Step B | SoA, 1 thread | **1.483e-03** | **diferença de 4.0%** |
 | Step B + Step C | SoA, 8 threads | **7.513e-04** | **+47.3%** |
 
-Leitura direta: com `ants.advance` também paralelizado, o Step C passa a gerar ganho forte. Neste conjunto de medidas, o Step B isolado (1 thread) não melhorou, mas combinado com OpenMP em vários núcleos trouxe o melhor tempo final.
+Leitura direta: com `ants.advance` também paralelizado, o Step C passa a gerar ganho forte. Neste conjunto de medidas, o Step B isolado em 1 thread mostrou diferença pequena e sensível ao ruído, enquanto combinado com OpenMP em vários núcleos trouxe o melhor tempo final.
 
 Referência adicional da mesma campanha de medidas:
 
@@ -600,7 +600,7 @@ Referência adicional da mesma campanha de medidas:
 | Passo | Resultado | Lição Principal |
 |---|---|---|
 | **A — Serial** | ~1.43 ms/iter; `ants.advance` domina | Identificar o gargalo é o primeiro passo de qualquer otimização |
-| **B — SoA** | variação negativa em 1 núcleo (~-4.0% neste conjunto) | SoA isolado pode variar conforme carga de memória/cache |
+| **B — SoA** | diferença pequena em 1 núcleo (~4.0% neste conjunto) | SoA isolado pode variar conforme carga de memória/cache e ruído de medição |
 | **C — OpenMP** | com `ants.advance` paralelo, ganho forte em multicore (~47% no melhor caso medido) | Atacar o gargalo principal muda o regime de escalabilidade |
 | **D — MPI** | Implementação OK, benchmark bloqueado | $O(n^2)$ de comunicação é o risco: funciona para n pequeno, satura para n grande |
 
