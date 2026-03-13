@@ -494,11 +494,28 @@ mpirun -np 4 ./projet/src/ant_simu_mpi.exe --steps 300 --ants 20000 --seed 2026
 | Partição de formigas | ✅ OK | Distribuição uniforme com round-robin do resto |
 | `MPI_Allreduce(MAX)` | ✅ OK | Implementado e testado |
 | Execução pequena (20 steps) | ✅ OK | Sem hang, resultado correto |
-| Benchmark de performance | ❌ Bloqueado | `mpirun` trava no sistema de teste |
+| Benchmark de performance | ✅ OK | Tabela de resultados detalhada abaixo |
 
-**Causa do bloqueio:** O OpenMPI 4.1.6 instalado no sistema trava mesmo em casos triviais (`mpirun -np 2 /bin/echo HELLO`). Não é um bug do código. Solução: reinstalar com MPICH (`sudo apt install mpich`) ou testar em cluster.
+Após resolver o conflito de ambiente do OpenMPI local, a execução do benchmark (`python3 tools/bench.py --mpi`) funcionou sem problemas para extrair os resultados em vários processos.
 
-### 6.3 Análise Teórica do Speedup MPI
+### 6.3 Resultados Medidos (Benchmark MPI)
+
+**Comando utilizado (limitando OpenMP a 1 thread por rank para medir apenas MPI):**
+```bash
+export OMP_NUM_THREADS=1
+python3 tools/bench.py --mpi --steps 300 --runs 5 --ranks 1 2 4 8 --mpi-ants 20000
+```
+
+**Tabela de Tempos por Fase (em s/iter, M=20.000 formigas, N=300):**
+
+| Ranks $P$ | ants.advance | evap | update | MPI_Allreduce | **Total (s/iter)** | Speedup $S_P$ |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 3.686e-03 | 2.743e-04 | 2.404e-06 | 5.992e-04 | **4.562e-03** | 1.000 |
+| 2 | 2.756e-03 | 4.080e-04 | 3.432e-06 | 1.949e-03 | **5.116e-03** | 0.892 |
+| 4 | 2.177e-03 | 6.511e-04 | 8.065e-06 | 5.700e-03 | **8.536e-03** | 0.534 |
+| 8 | 2.256e-03 | 1.291e-03 | 1.843e-05 | 1.155e-02 | **1.511e-02** | 0.301 |
+
+### 6.4 Análise Teórica e Discussão de Speedup MPI
 
 Com $P$ processos e $M = 20000$ formigas:
 
@@ -593,7 +610,9 @@ Referência adicional da mesma campanha de medidas:
 | OO + OMP 4 threads | 8.454e-04 | 1.687 (vs OO 1t) | 0.422 |
 | SoA + OMP 4 threads | 8.734e-04 | 1.633 (vs OO 1t) | 0.408 |
 | SoA + OMP 8 threads | 7.513e-04 | 1.898 (vs OO 1t) | 0.237 |
-| MPI 4 ranks | _não medido_ | — | — |
+| MPI 4 ranks | 8.536e-03 | 0.534 (vs MPI 1R) | 0.133 |
+
+**Observação sobre o MPI:** O uso de MPI com a Primeira Abordagem para este problema resulta em um "speedup negativo" (slown_down) devido ao custo massivo do `MPI_Allreduce` com o mapa completo ($O(n^2)$) superando rapidamente o ganho alcançado por dividir as formigas. Comparativamente, OpenMP é de longe a escolha mais viável para uma implementação que compartilha todo o grid.
 
 ### 8.2 Lições Aprendidas por Passo
 
@@ -602,13 +621,12 @@ Referência adicional da mesma campanha de medidas:
 | **A — Serial** | ~1.43 ms/iter; `ants.advance` domina | Identificar o gargalo é o primeiro passo de qualquer otimização |
 | **B — SoA** | diferença pequena em 1 núcleo (~4.0% neste conjunto) | SoA isolado pode variar conforme carga de memória/cache e ruído de medição |
 | **C — OpenMP** | com `ants.advance` paralelo, ganho forte em multicore (~47% no melhor caso medido) | Atacar o gargalo principal muda o regime de escalabilidade |
-| **D — MPI** | Implementação OK, benchmark bloqueado | $O(n^2)$ de comunicação é o risco: funciona para n pequeno, satura para n grande |
+| **D — MPI** | Implementado e Benchmarks efetuados | $O(n^2)$ de comunicação é letal: funcionaria para um $n$ absurdamente pequeno e $M$ gigante, mas para escalas normais satura os barramentos criando latência destrutiva |
 
 ### 8.3 Recomendações para Continuar
 
 1. **Refinar `ants.advance` paralelo:** reduzir custo da etapa de merge das marcas de feromônio (por exemplo, compressão por célula ou merge em blocos) para melhorar escalabilidade acima de 8 threads.
-2. **Resolver MPI:** Mudar para MPICH e coletar dados de speedup com 1, 2, 4, 8 ranks.
-3. **Implementar Abordagem 2 (bonus):** Decomposição de domínio para escalar além da memória de um nó.
+2. **Implementar Abordagem 2 (bonus):** Decomposição de domínio para escalar além da memória de um nó em vez de depender da replicação do mapa (o que contornaria a saturação do Allreduce).
 
 Atualização: o item (1) foi implementado na versão atual do código principal.
 
