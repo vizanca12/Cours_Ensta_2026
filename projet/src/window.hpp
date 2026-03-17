@@ -1,3 +1,12 @@
+/*
+ * window.hpp
+ *
+ * Abstracao minima para janela SDL.
+ *
+ * Objetivo:
+ * reduzir boilerplate SDL no restante do projeto e oferecer uma API pequena
+ * para operacoes de desenho basicas usadas pelo renderer.
+ */
 #pragma once
 #include <SDL2/SDL.h>
 

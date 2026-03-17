@@ -1,3 +1,21 @@
+/*
+ * pheronome.hpp
+ *
+ * MODELO DE DADOS DO FEROMONIO
+ * Cada celula possui dois valores:
+ * - canal 0: trilha para comida,
+ * - canal 1: trilha para ninho.
+ *
+ * ARQUITETURA INTERNA
+ * - m_map_of_pheronome : estado atual da iteracao.
+ * - m_buffer_pheronome : estado em construcao para o proximo passo.
+ * - ghost border       : contorno extra com valores invalidos (-1), evitando
+ *                        checagens de fronteira em cada acesso de vizinho.
+ *
+ * BENEFICIO
+ * O double-buffer evita dependencias de escrita/leitura dentro do mesmo passo,
+ * mantendo a dinamica numerica consistente e facilitando paralelizacao.
+ */
 #ifndef _PHERONOME_HPP_
 #define _PHERONOME_HPP_
 #include <algorithm>
@@ -15,6 +33,9 @@
  */
 class pheronome {
 public:
+    /*
+     * Layout por celula: [V_food, V_nest].
+     */
     using size_t      = unsigned long;
     using pheronome_t = std::array< double, 2 >;
 
@@ -72,8 +93,11 @@ public:
       return m_map_of_pheronome[index(pos)];
     }
 
-    // --- Helpers for MPI / instrumentation ---
-    // Layout: contiguous doubles (2 per cell) over (dim+2)*(dim+2) cells.
+    /*
+     * Helpers MPI/instrumentacao.
+     * Exposicao em bloco contiguo permite chamar coletivas diretamente no
+     * armazenamento interno, reduzindo copia e serializacao adicional.
+     */
     double* raw_map_doubles() { return reinterpret_cast<double*>(m_map_of_pheronome.data()); }
     const double* raw_map_doubles() const { return reinterpret_cast<const double*>(m_map_of_pheronome.data()); }
     std::size_t raw_map_doubles_count() const { return m_map_of_pheronome.size() * 2; }
@@ -85,6 +109,7 @@ public:
 
     void sync_buffer_from_map()
     {
+        // Mantem coerencia entre mapa atual e buffer usado no proximo passo.
         if (m_buffer_pheronome.size() != m_map_of_pheronome.size())
             m_buffer_pheronome.resize(m_map_of_pheronome.size());
         #pragma omp parallel for schedule(static)
@@ -93,6 +118,7 @@ public:
     }
 
     void do_evaporation( ) {
+        // Evapora apenas area util; bordas fantasma permanecem marcadas como invalidas.
         #pragma omp parallel for collapse(2) schedule(static)
         for ( std::size_t i = 1; i <= m_dim; ++i )
             for ( std::size_t j = 1; j <= m_dim; ++j ) {
@@ -102,6 +128,14 @@ public:
     }
 
     void mark_pheronome( const position_t& pos ) {
+                /*
+                 * Regra de deposicao/propagacao local:
+                 * novo_valor = alpha * max(vizinhos) + (1-alpha) * media(vizinhos).
+                 *
+                 * Intuicao:
+                 * - termo de maximo reforca a melhor trilha,
+                 * - termo de media suaviza e evita instabilidade local.
+                 */
                 int i = pos.x;
                 int j = pos.y;
                 assert( i >= 0 );
@@ -131,6 +165,7 @@ public:
     }
 
     void update( ) {
+        // Caminho padrao: troca buffers + sincroniza buffer auxiliar.
         update_no_sync();
         // Garantit que le buffer utilisé au pas suivant part bien de l'état courant.
         sync_buffer_from_map();
@@ -138,6 +173,7 @@ public:
 
     // Variante utilisée par MPI: on peut faire un merge global (MAX) puis synchroniser une seule fois.
     void update_no_sync( ) {
+        // Caminho usado em MPI quando havera merge global antes do proximo passo.
         m_map_of_pheronome.swap( m_buffer_pheronome );
         cl_update( );
         m_map_of_pheronome[static_cast<size_t>( m_pos_food.x + 1 ) * m_stride + static_cast<size_t>( m_pos_food.y + 1 )][0] = 1;

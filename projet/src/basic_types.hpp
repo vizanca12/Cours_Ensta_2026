@@ -1,3 +1,12 @@
+/*
+ * basic_types.hpp
+ *
+ * Arquivo de tipos basicos compartilhados por todo o projeto.
+ *
+ * - position_t: ponto 2D (x, y) usado para formiga, ninho e comida.
+ * - operator== : comparacao direta entre duas posicoes.
+ * - dimension_t: par de dimensoes (largura, altura), util para UI/utilitarios.
+ */
 #ifndef _BASIC_TYPES_HPP_
 #define _BASIC_TYPES_HPP_
 #include <SDL2/SDL.h>

@@ -1,3 +1,29 @@
+/*
+ * ant_simu.cpp
+ *
+ * VISÃO GERAL
+ * Este arquivo e o "orquestrador" da simulacao local (sem MPI). Ele integra:
+ * - modelo das formigas (ant),
+ * - terreno fractal (fractal_land),
+ * - mapa de feromonio (pheronome),
+ * - renderizacao opcional via SDL.
+ *
+ * MODOS DE EXECUCAO
+ * 1) AoS: vetor de objetos ant (modelo tradicional).
+ * 2) SoA: vetores separados por campo (x/y/estado/semente), melhor para localidade.
+ * 3) GUI: exibicao em tempo real.
+ * 4) no-gui: benchmark puro, evitando custo de render.
+ *
+ * CICLO DE UMA ITERACAO
+ * A) movimenta formigas e acumula marcas de feromonio,
+ * B) evapora feromonio,
+ * C) troca/sincroniza buffers,
+ * D) renderiza (se habilitado).
+ *
+ * OBJETIVO DE PROJETO
+ * Manter o mesmo comportamento da simulacao enquanto mede impacto de
+ * organizacao de memoria (AoS/SoA) e paralelizacao OpenMP.
+ */
 #include <vector>
 #include <iostream>
 #include <string>
@@ -12,6 +38,11 @@
 # include "rand_generator.hpp"
 
 namespace {
+/*
+ * Opcoes de linha de comando.
+ * Aqui ficam os parametros que controlam reproducibilidade (seed),
+ * tamanho da carga (nb_ants/steps) e modo de execucao (GUI e SoA).
+ */
 struct Options {
     std::size_t seed = 2026;
     int nb_ants = 5000;
@@ -28,6 +59,12 @@ struct Timings {
     std::size_t iters = 0;
 };
 
+/*
+ * Parser de argumentos CLI.
+ * Entrada: argc/argv.
+ * Saida: struct Options preenchida.
+ * Falha: argumento invalido encerra com codigo != 0 para facilitar automacao.
+ */
 Options parse_args(int nargs, char* argv[])
 {
     Options opt;
@@ -65,6 +102,19 @@ void advance_time_timed( const fractal_land& land, pheronome& phen,
                          std::vector<ant>& ants, std::size_t& cpteur,
                          Timings& timings )
 {
+    /*
+    * Versao AoS + OpenMP.
+    *
+    * Ideia principal:
+    * - paralelizar o movimento das formigas,
+    * - evitar escrita concorrente direta no mapa de feromonio.
+    *
+    * Como evita race condition:
+    * 1) cada thread guarda marcas locais (local_marks),
+    * 2) apos a regiao paralela, o thread principal aplica todas as marcas.
+    *
+    * Efeito: elimina lock por celula durante advance(), reduzindo contencao.
+     */
     using clock = std::chrono::steady_clock;
     auto t0 = clock::now();
 
@@ -117,6 +167,19 @@ void advance_time_timed_soa( const fractal_land& land, pheronome& phen,
                              AntSoA& ants, std::size_t& cpteur,
                              double eps, Timings& timings )
 {
+    /*
+    * Versao SoA + OpenMP.
+    *
+    * Diferenca para AoS:
+    * - AoS: [ant0 completo][ant1 completo]...
+    * - SoA: [x0 x1 x2...][y0 y1 y2...][estado...][seed...]
+    *
+    * Vantagem esperada:
+    * melhor localidade para acessos por campo e menor trafego inutil de cache.
+    *
+    * Importante:
+    * a regra biologica da simulacao e a mesma; muda apenas a representacao.
+     */
     constexpr double k_min_step_cost = 1e-3;
     constexpr int k_max_substeps = 4096;
     constexpr int k_max_random_tries = 64;
@@ -239,6 +302,16 @@ void advance_time_timed_soa( const fractal_land& land, pheronome& phen,
 
 int main(int nargs, char* argv[])
 {
+    /*
+    * Fase de bootstrap da simulacao.
+    *
+    * Ordem de inicializacao:
+    * 1) ler opcoes,
+    * 2) inicializar SDL (se GUI),
+    * 3) criar terreno e normalizar custos,
+    * 4) inicializar formigas,
+    * 5) criar mapa de feromonio.
+     */
     Options opt = parse_args(nargs, argv);
     if (opt.vectorized && !opt.no_gui) {
         std::cerr << "--vectorized requires --no-gui (no renderer integration yet).\n";
@@ -324,6 +397,10 @@ int main(int nargs, char* argv[])
     };
 
     if (opt.steps > 0) {
+        /*
+         * Modo benchmark finito.
+         * Bom para comparacoes reproduziveis entre versoes e numero de threads.
+         */
         for (it = 1; it <= opt.steps; ++it) {
             if (!opt.no_gui) {
                 while (SDL_PollEvent(&event)) {
@@ -344,6 +421,10 @@ int main(int nargs, char* argv[])
             }
         }
     } else {
+        /*
+         * Modo interativo.
+         * A simulacao roda indefinidamente ate o usuario fechar a janela.
+         */
         while (cont_loop) {
             ++it;
             while (!opt.no_gui && SDL_PollEvent(&event)) {
@@ -364,6 +445,16 @@ int main(int nargs, char* argv[])
     }
 
     if (timings.iters > 0) {
+        /*
+         * Relatorio final de desempenho.
+         *
+         * O que os numeros significam:
+         * - ants.advance: custo dominante da dinamica das formigas.
+         * - pheromone.evap/update: custo da manutencao do campo.
+         * - render: custo visual (quando GUI ativa).
+         *
+         * Esse bloco e base para os scripts de benchmark do projeto.
+         */
         const double iters = static_cast<double>(timings.iters);
         std::cout << "\n==== Timings (total) ====\n";
         const std::size_t ants_count = opt.vectorized ? ants_soa.size() : ants.size();

@@ -1,3 +1,20 @@
+/*
+ * ant_simu_mpi.cpp
+ *
+ * VISÃO GERAL DA VERSAO MPI (ABORDAGEM 1)
+ * - Cada rank (processo MPI) processa apenas parte das formigas.
+ * - Cada rank mantem uma copia inteira do mapa de feromonio e do terreno.
+ * - Ao final de cada iteracao, todos os ranks sincronizam o mapa completo via
+ *   MPI_Allreduce usando MPI_MAX.
+ *
+ * POR QUE ISSO EXISTE
+ * Essa estrategia e simples e deterministica: evita migracao de formigas entre
+ * ranks e facilita validar o comportamento do modelo.
+ *
+ * LIMITACAO ESPERADA
+ * O custo de comunicacao cresce com o numero de ranks, porque a sincronizacao
+ * e global e envolve todo o mapa a cada iteracao.
+ */
 #include <mpi.h>
 
 #include <omp.h>
@@ -17,6 +34,11 @@
 #include "rand_generator.hpp"
 
 namespace {
+/*
+ * Parametros de execucao.
+ * Esses campos controlam carga de trabalho, fisica do modelo e grau de hibridismo
+ * MPI+OpenMP (threads por rank).
+ */
 struct Options {
     std::size_t seed = 2026;
     std::size_t steps = 200;
@@ -36,6 +58,10 @@ struct Timings {
     std::size_t iters = 0;
 };
 
+/*
+ * Parse da linha de comando.
+ * Util para benchmark automatizado, permitindo variar um parametro por vez.
+ */
 Options parse_args(int nargs, char* argv[])
 {
     Options opt;
@@ -84,6 +110,11 @@ struct AntSoA {
     std::size_t size() const { return x.size(); }
 };
 
+/*
+ * Normaliza o terreno para [0,1].
+ * Isso evita que mudancas na geracao aleatoria alterem artificialmente
+ * o "tamanho do passo" efetivo das formigas.
+ */
 static inline void normalize_land(fractal_land& land)
 {
     double max_val = 0.0;
@@ -100,6 +131,11 @@ static inline void normalize_land(fractal_land& land)
         }
 }
 
+/*
+ * Particionamento de formigas por intervalo global.
+ * Exemplo: n_total=10, n_ranks=3 -> [4,3,3].
+ * Essa funcao garante distribuicao balanceada com diferenca maxima de 1 formiga.
+ */
 static inline void compute_local_range(std::size_t n_total, int rank, int n_ranks,
                                       std::size_t& begin, std::size_t& end)
 {
@@ -115,6 +151,19 @@ void advance_local_ants(const fractal_land& land, pheronome& phen,
                         AntSoA& ants, std::size_t& local_food_counter,
                         double eps)
 {
+    /*
+    * Kernel local de simulacao de formigas.
+    *
+    * Entrada:
+    * - subconjunto local de formigas (arrays SoA),
+    * - mapa de feromonio local,
+    * - terreno local (replicado).
+    *
+    * Saida:
+    * - novas posicoes/estados das formigas locais,
+    * - marcas aplicadas no mapa local,
+    * - contador local de comida entregue.
+     */
     constexpr double k_min_step_cost = 1e-3;
     constexpr int k_max_substeps = 4096;
     constexpr int k_max_random_tries = 64;
@@ -196,6 +245,10 @@ void advance_local_ants(const fractal_land& land, pheronome& phen,
 
 int main(int nargs, char* argv[])
 {
+    /*
+    * Inicializacao MPI (processos) e OpenMP (threads por processo).
+    * O processo rank 0 atua como agregador final das metricas.
+     */
     MPI_Init(&nargs, &argv);
 
     int rank = 0;
@@ -210,7 +263,10 @@ int main(int nargs, char* argv[])
     omp_set_dynamic(0);
     omp_set_num_threads(opt.omp_threads);
 
-    // Environment replicated on all ranks
+    /*
+     * Ambiente replicado por rank.
+     * Isso simplifica a logica, pois nao existe troca de formigas entre ranks.
+     */
     position_t pos_nest{256, 256};
     position_t pos_food{500, 500};
     fractal_land land(8, 2, 1., 1024);
@@ -218,7 +274,7 @@ int main(int nargs, char* argv[])
 
     pheronome phen(land.dimensions(), pos_food, pos_nest, opt.alpha, opt.beta);
 
-    // Distribute ants by contiguous ranges over global indices
+    // Paralelizacao escolhida: dividir agentes, nao dividir o dominio espacial.
     std::size_t begin = 0, end = 0;
     compute_local_range(opt.nb_ants_total, rank, n_ranks, begin, end);
     const std::size_t local_n = end - begin;
@@ -229,7 +285,7 @@ int main(int nargs, char* argv[])
     ants.loaded.reserve(local_n);
     ants.seed.reserve(local_n);
 
-    // Deterministic per-ant initialization (no scatter needed)
+    // Inicializacao deterministica por indice global, importante para comparacao justa.
     for (std::size_t g = begin; g < end; ++g) {
         std::size_t s = opt.seed + g * 1000003ULL;
         const int x = rand_int32(0, static_cast<std::int32_t>(land.dimensions() - 1), s);
@@ -248,6 +304,15 @@ int main(int nargs, char* argv[])
     reduced.resize(phen.raw_map_doubles_count());
 
     for (std::size_t it = 0; it < opt.steps; ++it) {
+        /*
+         * Pipeline de cada iteracao:
+         * 1) mover formigas locais,
+         * 2) evaporar e atualizar feromonio local,
+         * 3) sincronizar mapa global com MPI_Allreduce(MAX).
+         *
+         * Observacao de desempenho:
+         * o passo (3) tende a dominar quando o numero de ranks aumenta.
+         */
         const double wall0 = MPI_Wtime();
         auto t0 = clock::now();
         advance_local_ants(land, phen, pos_nest, pos_food, ants, local_food, opt.eps);
@@ -257,7 +322,7 @@ int main(int nargs, char* argv[])
         phen.update_no_sync();
         auto t3 = clock::now();
 
-        // Merge pheromones across ranks: take maximum value for each cell/field
+        // Merge global do mapa (coletiva bloqueante): todos os ranks precisam participar.
         auto t4 = clock::now();
         MPI_Allreduce(phen.raw_map_doubles(), reduced.data(),
                       static_cast<int>(phen.raw_map_doubles_count()),
@@ -275,7 +340,7 @@ int main(int nargs, char* argv[])
         timings.iters += 1;
     }
 
-    // Reduce counters and timings to rank 0
+    // Consolidacao final de contadores e tempos no rank 0.
     std::size_t global_food = 0;
     MPI_Reduce(&local_food, &global_food, 1, MPI_UNSIGNED_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 
@@ -289,6 +354,11 @@ int main(int nargs, char* argv[])
     MPI_Reduce(&timings.wall_s, &wall_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
     if (rank == 0) {
+        /*
+         * Relatorio final.
+         * - wall-time max mostra o tempo real da execucao paralela.
+         * - medias por rank ajudam a comparar custo computacional x comunicacao.
+         */
         const double iters = static_cast<double>(timings.iters);
         std::cout << "==== MPI Ant Simulation (Approach 1) ====\n";
         std::cout << "ranks: " << n_ranks << " ants_total: " << opt.nb_ants_total

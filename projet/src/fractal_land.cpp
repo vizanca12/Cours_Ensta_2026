@@ -1,3 +1,13 @@
+/*
+ * fractal_land.cpp
+ *
+ * Geracao procedural do terreno fractal (base do custo de movimento).
+ *
+ * Pipeline:
+ * 1) inicializa uma malha grosseira de pontos conhecidos,
+ * 2) refina em niveis sucessivos (subgrades menores),
+ * 3) injeta ruido proporcional ao nivel para manter variacao espacial.
+ */
 # include "fractal_land.hpp"
 # include "rand_generator.hpp"
 
@@ -5,6 +15,12 @@ void
 fractal_land::compute_subgrid( int log_subgrid_dim, int iB, int jB, double deviation,
                                std::size_t seed )
 {
+    /*
+     * Passo local de refinamento:
+     * - calcula bordas (midpoints),
+     * - calcula centro,
+     * - aplica perturbacao pseudo-aleatoria limitada por deviation.
+     */
     // Génère des réels pseudo-aléatoires compris dans [-deviation;+deviation]
     RandomGenerator gen( seed, -deviation, deviation );
 
@@ -26,6 +42,12 @@ fractal_land::compute_subgrid( int log_subgrid_dim, int iB, int jB, double devia
 fractal_land::fractal_land( const dim_t& ln2_dim, unsigned long nbSeeds, double deviation, int seed ) :
     m_dimensions(0), m_altitude()
 {
+    /*
+     * Construtor:
+     * - define dimensao total,
+     * - inicializa seeds de altitude,
+     * - executa refinamento hierarquico ate o nivel minimo.
+     */
     // dim_ss_grid = 2^{ln2_dim}
     unsigned long dim_ss_grid = 1UL<<(ln2_dim);
     m_dimensions = nbSeeds*dim_ss_grid+1;

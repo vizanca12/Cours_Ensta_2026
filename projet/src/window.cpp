@@ -1,3 +1,10 @@
+/*
+ * window.cpp
+ *
+ * Ciclo de vida da infraestrutura de janela:
+ * - construcao: cria janela e contexto de renderizacao,
+ * - destruicao: libera recursos para evitar vazamento de memoria/handles.
+ */
 #include "window.hpp"
 
 Window::Window(const char* title, int width, int height)

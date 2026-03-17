@@ -1,3 +1,14 @@
+/*
+ * renderer.cpp
+ *
+ * Implementacao do pipeline de renderizacao por frame.
+ *
+ * Passos de desenho:
+ * 1) preparar fundo/terreno,
+ * 2) sobrepor entidades dinamicas (formigas e feromonio),
+ * 3) desenhar grafico historico,
+ * 4) apresentar frame na tela.
+ */
 #include <limits>
 #include <algorithm>
 #include "renderer.hpp"
@@ -22,6 +33,10 @@ Renderer::~Renderer() {
 // ====================================================================================================================
 void Renderer::display( Window& win, std::size_t const& compteur )
 {
+    /*
+     * Chamado uma vez por frame.
+     * Mantem a ordem de camadas para garantir leitura visual consistente.
+     */
     SDL_Renderer* renderer = SDL_GetRenderer( win.get() );
     
     // Créer la texture du paysage si elle n'existe pas encore
@@ -63,14 +78,14 @@ void Renderer::display( Window& win, std::size_t const& compteur )
     // Activer le blending pour un rendu plus fluide
     SDL_SetRenderDrawBlendMode( renderer, SDL_BLENDMODE_BLEND );
     
-    // Affichage des fourmis dans le cadran en haut à gauche :
+    // Camada 1: formigas no painel esquerdo.
     for ( auto& ant : m_ref_ants ) {
         const position_t& pos_ant = ant.get_position( );
         win.set_pen( 0, 255, 255 );
         win.pset( static_cast<int>( pos_ant.x ), static_cast<int>( pos_ant.y ) );
     }
     
-    // Affichage des phéronomes dans le cadran en haut à droite :
+    // Camada 2: feromonios no painel direito.
     for ( fractal_land::dim_t i = 0; i < m_ref_land.dimensions( ); ++i )
         for ( fractal_land::dim_t j = 0; j < m_ref_land.dimensions( ); ++j ) {
             double r = std::min( 1., (double)m_ref_phen( i, j )[0] );
@@ -82,7 +97,7 @@ void Renderer::display( Window& win, std::size_t const& compteur )
             }
         }
     
-    // Affichage de la courbe d'enfouragement :
+    // Camada 3: curva historica de comida entregue.
     m_curve.push_back(compteur);
     if ( m_curve.size( ) > 1 ) {
         int sz_win = win.size( ).first;

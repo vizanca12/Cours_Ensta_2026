@@ -1,3 +1,18 @@
+/*
+ * renderer.hpp
+ *
+ * Camada de apresentacao da simulacao.
+ *
+ * Separa a visualizacao da logica fisica para manter o codigo modular:
+ * - a simulacao calcula estado,
+ * - o renderer apenas le esse estado e desenha.
+ *
+ * Elementos desenhados:
+ * 1) relevo do terreno,
+ * 2) enxame de formigas,
+ * 3) campo de feromonio,
+ * 4) serie temporal de comida no ninho.
+ */
 #pragma once
 #include "fractal_land.hpp"
 #include "ant.hpp"

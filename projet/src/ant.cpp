@@ -1,3 +1,17 @@
+/*
+ * ant.cpp
+ *
+ * Este arquivo implementa o "comportamento local" da formiga.
+ *
+ * O metodo advance() e o nucleo da simulacao de agentes:
+ * - recebe o estado global (terreno + feromonio),
+ * - aplica regras estocasticas de movimento,
+ * - atualiza estado interno da formiga,
+ * - contribui para o campo de feromonio.
+ *
+ * Resultado pratico:
+ * muitas chamadas de advance() em paralelo formam a dinamica coletiva.
+ */
 #include "ant.hpp"
 #include <iostream>
 #include "rand_generator.hpp"
@@ -7,6 +21,12 @@ double ant::m_eps = 0.;
 void ant::advance( pheronome& phen, const fractal_land& land, const position_t& pos_food, const position_t& pos_nest,
                    std::size_t& cpteur_food, std::vector<position_t>* pheromone_marks ) 
 {
+    /*
+     * Guardas numericas de seguranca:
+     * - k_min_step_cost: evita incremento quase zero de tempo consumido.
+     * - k_max_substeps: limita o numero de submovimentos no mesmo passo.
+     * - k_max_random_tries: limita tentativas de escolha aleatoria valida.
+     */
     constexpr double k_min_step_cost = 1e-3;
     constexpr int k_max_substeps = 4096;
     constexpr int k_max_random_tries = 64;
@@ -14,9 +34,12 @@ void ant::advance( pheronome& phen, const fractal_land& land, const position_t& 
     auto dir_choice = [this]() mutable { return rand_int32( 1, 4, this->m_seed ); };
     double                                   consumed_time = 0.;
     int substeps = 0;
-    // Tant que la fourmi peut encore bouger dans le pas de temps imparti
+    /*
+     * Cada iteracao do while representa um submovimento da formiga.
+     * O loop termina quando a formiga "gasta" 1 unidade de tempo de movimento.
+     */
     while ( ( consumed_time < 1. ) && ( substeps < k_max_substeps ) ) {
-        // Si la fourmi est chargée, elle suit les phéromones de deuxième type, sinon ceux du premier.
+        // Escolhe canal de feromonio conforme estado da formiga.
         int        ind_pher    = ( is_loaded( ) ? 1 : 0 );
         double     choix       = ant_choice( );
         position_t old_pos_ant = get_position( );
@@ -25,6 +48,11 @@ void ant::advance( pheronome& phen, const fractal_land& land, const position_t& 
                                      phen( new_pos_ant.x + 1, new_pos_ant.y )[ind_pher],
                                      phen( new_pos_ant.x, new_pos_ant.y - 1 )[ind_pher],
                                      phen( new_pos_ant.x, new_pos_ant.y + 1 )[ind_pher]} );
+        /*
+         * Politica de acao (exploracao vs exploracao guiada):
+         * - componente aleatoria ajuda a descobrir novos caminhos,
+         * - componente gulosa (max feromonio) explora trilhas ja aprendidas.
+         */
         if ( ( choix > m_eps ) || ( max_phen <= 0. ) ) {
             bool found = false;
             for ( int tries = 0; tries < k_max_random_tries; ++tries ) {
@@ -61,6 +89,11 @@ void ant::advance( pheronome& phen, const fractal_land& land, const position_t& 
             phen.mark_pheronome( new_pos_ant );
         }
         m_position = new_pos_ant;
+        /*
+         * Maquina de estados da formiga:
+         * - ao atingir ninho: descarrega comida (se houver) e volta a buscar.
+         * - ao atingir comida: muda para estado carregada e passa a retornar.
+         */
         if ( get_position( ) == pos_nest ) {
             if ( is_loaded( ) ) {
                 cpteur_food += 1;

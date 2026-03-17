@@ -1,3 +1,15 @@
+/*
+ * fractal_land.hpp
+ *
+ * Representacao do mapa de custo da simulacao.
+ *
+ * Ideia:
+ * - cada celula guarda uma "altitude" usada como custo de deslocamento,
+ * - o mapa e gerado proceduralmente para criar relevos irregulares.
+ *
+ * Uso na simulacao:
+ * quanto maior o valor da celula, maior o custo de movimento da formiga.
+ */
 #ifndef _FRACTAL_LAND_HPP_
 # define _FRACTAL_LAND_HPP_
 // Génération d'un fractal pour le coût énergie ( altitude ) de déplacement d'une fourmie
@@ -32,6 +44,10 @@
 class fractal_land
 {
 public:
+    /*
+     * container: armazenamento linear da matriz 2D.
+     * dim_t: tipo inteiro para indexacao e dimensoes.
+     */
     using container=std::vector<double>;
     using dim_t=unsigned long;
     fractal_land( const dim_t& log_size, unsigned long nbSeeds, double deviation, int seed = 0 );
@@ -50,6 +66,11 @@ public:
     const double* data() const { return m_altitude.data(); }
 
 private:
+    /*
+     * compute_subgrid:
+     * executa uma etapa local de refinamento fractal em uma subgrade,
+     * preenchendo pontos medios e centro a partir dos cantos conhecidos.
+     */
     void compute_subgrid( int log_subgrid_dim, int iB, int jB, double deviation, std::size_t seed );
     dim_t m_dimensions;
     container m_altitude;
